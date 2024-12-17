@@ -47,7 +47,12 @@ class MainActivity: FlutterActivity() {
                     }
                     
                     // Start the foreground service
-                    startService(Intent(this, CallDetectorService::class.java))
+                    val serviceIntent = Intent(this, CallDetectorService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        startForegroundService(serviceIntent)
+                    } else {
+                        startService(serviceIntent)
+                    }
                     result.success(true)
                 }
                 else -> {
@@ -66,9 +71,20 @@ class MainActivity: FlutterActivity() {
         }
         if (requestCode == REQUEST_CODE_SET_DEFAULT_DIALER) {
             // Start service regardless of the result
-            startService(Intent(this, CallDetectorService::class.java))
+            val serviceIntent = Intent(this, CallDetectorService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(serviceIntent)
+            } else {
+                startService(serviceIntent)
+            }
         }
         super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clear FlutterEngine reference
+        CallReceiver.flutterEngine = null
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {

@@ -77,6 +77,11 @@ class _MyHomePageState extends State<MyHomePage> {
       try {
         print('Starting app initialization...');
 
+        // Set the context for overlay notifications
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          CallDetectorService().setContext(context);
+        });
+
         // Check database again
         final db = DatabaseHelper();
         try {

@@ -11,7 +11,8 @@ class CallDetectorService {
   final DatabaseHelper _databaseHelper = DatabaseHelper();
   final ImageDatabaseHelper _imageDatabaseHelper = ImageDatabaseHelper();
   bool _isInitialized = false;
-  static OverlaySupportEntry? _currentNotification;
+  static OverlayEntry? _overlayEntry;
+  static BuildContext? _context;
   
   static const platform = MethodChannel('com.example.caller_app/phone_state');
   static final CallDetectorService _instance = CallDetectorService._internal();
@@ -24,6 +25,10 @@ class CallDetectorService {
 
   void _setupMethodChannel() {
     platform.setMethodCallHandler(_handleMethodCall);
+  }
+
+  void setContext(BuildContext context) {
+    _context = context;
   }
 
   Future<void> initialize() async {
@@ -67,35 +72,37 @@ class CallDetectorService {
     }
   }
 
-  Future<void> _handleMethodCall(MethodCall call) async {
-    switch (call.method) {
-      case 'onIncomingCall':
-        final String phoneNumber = call.arguments as String;
-        await onIncomingCall(phoneNumber);
-        break;
-      default:
-        print('Unknown method ${call.method}');
-    }
-  }
-
-  Future<Uint8List?> _getCallerImage(String uidno) async {
-    print('Attempting to load image for UID: $uidno');
+  Future<dynamic> _handleMethodCall(MethodCall call) async {
     try {
-      final imageData = await _imageDatabaseHelper.getImageByUidno(int.parse(uidno));
-      if (imageData != null) {
-        print('Successfully loaded image for UID: $uidno (${imageData.length} bytes)');
-        return imageData;
-      } else {
-        print('No image found for UID: $uidno');
+      switch (call.method) {
+        case 'onIncomingCall':
+          final String phoneNumber = call.arguments as String;
+          await onIncomingCall(phoneNumber);
+          return null;
+        case 'getCallerInfo':
+          final phoneNumber = call.arguments as String;
+          final contact = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
+          if (contact != null) {
+            return {
+              'name': contact['name'],
+              'rank': contact['rank'],
+              'branch': contact['branch'],
+              'unit': contact['unit'],
+            };
+          }
+          return null;
+        default:
+          throw PlatformException(
+            code: 'NotImplemented',
+            message: 'Method ${call.method} not implemented',
+          );
       }
-      return null;
     } catch (e) {
-      print('Error loading image for UID $uidno: $e');
+      print('Error in method channel handler: $e');
       return null;
     }
   }
 
-  // This method will be called by the platform through the method channel
   Future<void> onIncomingCall(String phoneNumber) async {
     try {
       // Log the call
@@ -107,8 +114,9 @@ class CallDetectorService {
         return;
       }
 
-      // Dismiss any existing notification
-      _currentNotification?.dismiss();
+      // Remove existing overlay if any
+      _overlayEntry?.remove();
+      _overlayEntry = null;
 
       final callerInfo = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
       
@@ -121,144 +129,15 @@ class CallDetectorService {
           imageBytes = await _imageDatabaseHelper.getImageByUidno(int.parse(callerInfo['uidno'].toString()));
         }
 
-        _currentNotification = showOverlayNotification(
-          (context) {
-            return Container(
-              margin: EdgeInsets.only(top: MediaQuery.of(context).size.height * 0.15),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onTap: () {
-                  OverlaySupportEntry.of(context)?.dismiss();
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => ContactDetailsScreen(
-                        contactInfo: {...callerInfo, 'phone': phoneNumber},
-                        imageBytes: imageBytes,
-                      ),
-                    ),
-                  );
-                },
-                onPanUpdate: (details) {
-                  if (details.delta.dx.abs() > 3) {
-                    OverlaySupportEntry.of(context)?.dismiss();
-                  }
-                },
-                child: Card(
-                  color: const Color(0xFF2C3E50),
-                  elevation: 8,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Container(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 60,
-                              height: 60,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.grey[300],
-                                image: imageBytes != null
-                                    ? DecorationImage(
-                                        image: MemoryImage(imageBytes),
-                                        fit: BoxFit.cover,
-                                      )
-                                    : null,
-                              ),
-                              child: imageBytes == null
-                                  ? Icon(
-                                      Icons.person,
-                                      size: 40,
-                                      color: Colors.grey[600],
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 16),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    callerInfo['name']?.toString() ?? 'Unknown',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    '${callerInfo['rank'] ?? 'Unknown Rank'} - ${callerInfo['branch'] ?? 'Unknown Branch'}',
-                                    style: TextStyle(
-                                      color: Colors.white.withOpacity(0.95),
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-          duration: const Duration(seconds: 10),
-          position: NotificationPosition.top,
-          key: Key(DateTime.now().toString()),
+        _showOverlay(
+          callerInfo: callerInfo,
+          phoneNumber: phoneNumber,
+          imageBytes: imageBytes,
         );
       } else {
         print('No caller info found for number: $phoneNumber');
-        // Show a simple notification for unknown numbers
-        _currentNotification = showOverlayNotification(
-          (context) {
-            return Container(
-              margin: EdgeInsets.only(top: MediaQuery.of(context).size.height * 0.15),
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onPanUpdate: (details) {
-                  if (details.delta.dx.abs() > 3) {
-                    OverlaySupportEntry.of(context)?.dismiss();
-                  }
-                },
-                child: Card(
-                  color: const Color(0xFF2C3E50),
-                  child: ListTile(
-                    leading: Icon(
-                      Icons.phone_in_talk,
-                      color: Colors.white.withOpacity(0.9),
-                    ),
-                    title: Text(
-                      'Incoming Call',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.9),
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    subtitle: Text(
-                      phoneNumber,
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            );
-          },
-          duration: const Duration(seconds: 3),
-          position: NotificationPosition.top,
+        _showOverlay(
+          phoneNumber: phoneNumber,
         );
       }
     } catch (e) {
@@ -266,40 +145,209 @@ class CallDetectorService {
     }
   }
 
-  Widget _buildInfoColumn(String label, String? value) {
-    return Expanded(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            label,
-            style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
-              fontSize: 12,
+  void _showOverlay({
+    Map<String, dynamic>? callerInfo,
+    required String phoneNumber,
+    Uint8List? imageBytes,
+  }) {
+    if (_context == null) {
+      print('Error: Context not set for overlay');
+      return;
+    }
+
+    final overlayState = Overlay.of(_context!);
+    if (overlayState == null) {
+      print('Error: No overlay state found');
+      return;
+    }
+    
+    _overlayEntry = OverlayEntry(
+      builder: (context) => Positioned(
+        top: MediaQuery.of(context).size.height * 0.20,
+        left: 16,
+        right: 16,
+        child: Material(
+          type: MaterialType.transparency,
+          child: Container(
+            decoration: BoxDecoration(
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.2),
+                  blurRadius: 10,
+                  spreadRadius: 5,
+                ),
+              ],
+            ),
+            child: GestureDetector(
+              onTap: () {
+                if (callerInfo != null) {
+                  // Remove overlay first
+                  if (_overlayEntry != null) {
+                    _overlayEntry?.remove();
+                    _overlayEntry = null;
+                  }
+                  
+                  // Then navigate to details screen
+                  Navigator.push(
+                    _context!,
+                    MaterialPageRoute(
+                      builder: (context) => ContactDetailsScreen(
+                        contactInfo: callerInfo,
+                        imageBytes: imageBytes,
+                        number: phoneNumber,
+                      ),
+                    ),
+                  );
+                }
+              },
+              onPanUpdate: (details) {
+                if (details.delta.dx.abs() > 3) {
+                  _overlayEntry?.remove();
+                  _overlayEntry = null;
+                }
+              },
+              child: Card(
+                color: const Color(0xFF2C3E50).withOpacity(0.95),
+                elevation: 12,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: callerInfo != null
+                    ? _buildCallerInfoCard(callerInfo, phoneNumber, imageBytes)
+                    : _buildUnknownCallerCard(phoneNumber),
+              ),
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            value ?? 'N/A',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
+        ),
+      ),
+    );
+
+    overlayState.insert(_overlayEntry!);
+    
+    // Set auto-dismiss duration based on whether caller info exists
+    final dismissDuration = callerInfo != null ? 
+        const Duration(seconds: 30) :  // Known contact: 30 seconds
+        const Duration(seconds: 3);    // Unknown number: 3 seconds
+    
+    Future.delayed(dismissDuration, () {
+      if (_overlayEntry != null) {  // Only dismiss if not already dismissed by tap
+        _overlayEntry?.remove();
+        _overlayEntry = null;
+      }
+    });
+  }
+
+  Widget _buildCallerInfoCard(
+    Map<String, dynamic> callerInfo,
+    String phoneNumber,
+    Uint8List? imageBytes,
+  ) {
+    // Format phone number to show only last 10 digits
+    final formattedNumber = phoneNumber.length > 10 
+        ? phoneNumber.substring(phoneNumber.length - 10)
+        : phoneNumber;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      child: Row(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.grey[300],
+              image: imageBytes != null
+                  ? DecorationImage(
+                      image: MemoryImage(imageBytes),
+                      fit: BoxFit.cover,
+                    )
+                  : null,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            child: imageBytes == null
+                ? Icon(
+                    Icons.person,
+                    size: 40,
+                    color: Colors.grey[600],
+                  )
+                : null,
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  callerInfo['name']?.toString() ?? 'Unknown',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${callerInfo['rank'] ?? 'Unknown Rank'} - ${callerInfo['branch'] ?? 'Unknown Branch'}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.95),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Unit: ${callerInfo['unit'] ?? 'Unknown Unit'}',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  formattedNumber,
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.75),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDivider() {
-    return Container(
-      height: 24,
-      width: 1,
-      color: Colors.white.withOpacity(0.2),
-      margin: const EdgeInsets.symmetric(horizontal: 8),
+  Widget _buildUnknownCallerCard(String phoneNumber) {
+    // Format phone number to show only last 10 digits
+    final formattedNumber = phoneNumber.length > 10 
+        ? phoneNumber.substring(phoneNumber.length - 10)
+        : phoneNumber;
+
+    return ListTile(
+      leading: Icon(
+        Icons.phone_in_talk,
+        color: Colors.white.withOpacity(0.9),
+        size: 32,
+      ),
+      title: Text(
+        'Incoming Call',
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.9),
+          fontWeight: FontWeight.bold,
+          fontSize: 18,
+        ),
+      ),
+      subtitle: Text(
+        formattedNumber,
+        style: TextStyle(
+          color: Colors.white.withOpacity(0.8),
+          fontSize: 16,
+        ),
+      ),
     );
   }
 }

@@ -5,11 +5,13 @@ import 'package:photo_view/photo_view.dart';
 class ContactDetailsScreen extends StatelessWidget {
   final Map<String, dynamic> contactInfo;
   final Uint8List? imageBytes;
+  final String? number;
 
   const ContactDetailsScreen({
     Key? key,
     required this.contactInfo,
     this.imageBytes,
+    this.number,
   }) : super(key: key);
 
   void _showFullScreenImage(BuildContext context) {

@@ -8,6 +8,8 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import android.content.IntentFilter
 import android.telephony.TelephonyManager
+import android.provider.Settings
+import android.net.Uri
 
 class CallDetectorService : Service() {
     private val CHANNEL_ID = "CallerAppService"
@@ -17,6 +19,12 @@ class CallDetectorService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
+        
+        // Check for overlay permission
+        if (!Settings.canDrawOverlays(this)) {
+            requestOverlayPermission()
+            return
+        }
         
         // Register call receiver
         callReceiver = CallReceiver()
@@ -39,8 +47,45 @@ class CallDetectorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // Return sticky to keep the service running
+        when (intent?.action) {
+            "REQUEST_OVERLAY_PERMISSION" -> {
+                requestOverlayPermission()
+                return START_NOT_STICKY
+            }
+        }
+
+        // Re-register receiver if needed
+        if (callReceiver == null) {
+            callReceiver = CallReceiver()
+            val filter = IntentFilter().apply {
+                addAction(TelephonyManager.ACTION_PHONE_STATE_CHANGED)
+                addAction(Intent.ACTION_BOOT_COMPLETED)
+            }
+            registerReceiver(callReceiver, filter)
+        }
+
+        // Ensure we're in foreground
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            startForeground(
+                NOTIFICATION_ID,
+                createNotification(),
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
+            )
+        } else {
+            startForeground(NOTIFICATION_ID, createNotification())
+        }
+
         return START_STICKY
+    }
+
+    private fun requestOverlayPermission() {
+        val intent = Intent(
+            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+            Uri.parse("package:$packageName")
+        ).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        startActivity(intent)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
