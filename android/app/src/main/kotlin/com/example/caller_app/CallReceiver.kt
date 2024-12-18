@@ -44,11 +44,26 @@ class CallReceiver : BroadcastReceiver() {
             val state = intent.getStringExtra(TelephonyManager.EXTRA_STATE)
             var number = intent.getStringExtra(TelephonyManager.EXTRA_INCOMING_NUMBER)
 
-            Log.d(TAG, "Phone State: $state, Number: $number")
+            Log.d(TAG, "Phone State: $state, Original Number: $number")
 
             // Some devices might not provide the number in the first broadcast
             if (state == TelephonyManager.EXTRA_STATE_RINGING && number.isNullOrEmpty()) {
                 number = lastNumber
+            }
+
+            // Format phone number
+            if (!number.isNullOrEmpty()) {
+                // Remove any whitespace
+                number = number.replace("\\s+".toRegex(), "")
+                // Remove +91 prefix if present
+                if (number.startsWith("+91")) {
+                    number = number.substring(3)
+                }
+                // Get last 10 digits
+                if (number.length > 10) {
+                    number = number.substring(number.length - 10)
+                }
+                Log.d(TAG, "Formatted Number: $number")
             }
 
             // Avoid duplicate notifications
@@ -74,6 +89,29 @@ class CallReceiver : BroadcastReceiver() {
                 // Initialize overlay manager if needed
                 if (overlayManager == null) {
                     overlayManager = OverlayManager(context)
+                }
+
+                // Notify Flutter about incoming call
+                Handler(Looper.getMainLooper()).post {
+                    flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                        MethodChannel(messenger, CHANNEL).invokeMethod(
+                            "onIncomingCall",
+                            number,
+                            object : MethodChannel.Result {
+                                override fun success(result: Any?) {
+                                    Log.d(TAG, "Successfully notified Flutter about incoming call")
+                                }
+
+                                override fun error(code: String, message: String?, details: Any?) {
+                                    Log.e(TAG, "Error notifying Flutter about incoming call: $message")
+                                }
+
+                                override fun notImplemented() {
+                                    Log.e(TAG, "onIncomingCall not implemented in Flutter")
+                                }
+                            }
+                        )
+                    }
                 }
 
                 // Get caller info from Flutter

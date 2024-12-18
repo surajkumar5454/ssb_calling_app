@@ -20,45 +20,89 @@ import android.widget.FrameLayout
 import android.graphics.drawable.GradientDrawable
 import android.view.MotionEvent
 import kotlin.math.abs
+import io.flutter.plugin.common.MethodChannel
 
 class OverlayManager(private val context: Context) {
+    companion object {
+        private const val CHANNEL = "com.example.caller_app/phone_state"
+        var flutterEngine = CallReceiver.flutterEngine
+    }
+
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
     private var initialX: Float = 0f
     private var initialTouchX: Float = 0f
     private var isDismissing = false
+    private var isTap = false
+    private var startClickTime: Long = 0
+
+    private fun handleTouch(view: View, event: MotionEvent, phoneNumber: String): Boolean {
+        when (event.action) {
+            MotionEvent.ACTION_DOWN -> {
+                isTap = true
+                startClickTime = System.currentTimeMillis()
+                initialX = view.x
+                initialTouchX = event.rawX
+                return true
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val moved = abs(event.rawX - initialTouchX)
+                if (moved > 10) { // Small threshold to differentiate between tap and swipe
+                    isTap = false
+                }
+                view.x = initialX + event.rawX - initialTouchX
+                return true
+            }
+            MotionEvent.ACTION_UP -> {
+                val clickDuration = System.currentTimeMillis() - startClickTime
+                val moved = abs(event.rawX - initialTouchX)
+                
+                when {
+                    moved > 100 -> { // Swipe threshold
+                        dismissOverlay()
+                    }
+                    isTap && clickDuration < 200 -> { // Tap threshold
+                        // Navigate to contact details
+                        flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                            MethodChannel(messenger, CHANNEL).invokeMethod("navigateToContact", phoneNumber)
+                        }
+                        dismissOverlay()
+                    }
+                    else -> {
+                        view.x = initialX // Reset position
+                    }
+                }
+                return true
+            }
+            else -> return false
+        }
+    }
 
     fun showOverlay(callerInfo: Map<String, Any>?, phoneNumber: String) {
         if (overlayView != null) return
 
         windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
 
-        // Create overlay layout
         val layout = FrameLayout(context)
         layout.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
         
-        // Create card background
         val cardBackground = GradientDrawable()
-        cardBackground.setColor(Color.parseColor("#BF2C3E50")) // 75% opacity
+        cardBackground.setColor(Color.parseColor("#BF2C3E50"))
         cardBackground.cornerRadius = 16f * context.resources.displayMetrics.density
         
-        // Create content layout
         val contentLayout = LinearLayout(context)
         contentLayout.orientation = LinearLayout.HORIZONTAL
         contentLayout.setPadding(32, 24, 32, 24)
         
-        // Profile icon
         val profileIcon = ImageView(context)
         profileIcon.setImageResource(android.R.drawable.ic_dialog_info)
         val iconSize = (48 * context.resources.displayMetrics.density).toInt()
         profileIcon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
 
-        // Text content
         val textContent = LinearLayout(context)
         textContent.orientation = LinearLayout.VERTICAL
         textContent.setPadding((16 * context.resources.displayMetrics.density).toInt(), 0, 0, 0)
         
-        // Add text views
         if (callerInfo != null) {
             addTextView(textContent, callerInfo["name"]?.toString() ?: "Unknown", 18f, true)
             addTextView(textContent, "${callerInfo["rank"]} - ${callerInfo["branch"]}", 14f)
@@ -69,38 +113,13 @@ class OverlayManager(private val context: Context) {
             addTextView(textContent, formatPhoneNumber(phoneNumber), 16f)
         }
 
-        // Add views to layout
         contentLayout.addView(profileIcon)
         contentLayout.addView(textContent)
         layout.addView(contentLayout)
         layout.background = cardBackground
 
-        // Set up touch listener for swipe to dismiss
-        layout.setOnTouchListener { view, event ->
-            when (event.action) {
-                MotionEvent.ACTION_DOWN -> {
-                    initialX = view.x
-                    initialTouchX = event.rawX
-                    true
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    view.x = initialX + event.rawX - initialTouchX
-                    true
-                }
-                MotionEvent.ACTION_UP -> {
-                    val moved = abs(event.rawX - initialTouchX)
-                    if (moved > 100) { // Swipe threshold
-                        dismissOverlay()
-                    } else {
-                        view.x = initialX // Reset position
-                    }
-                    true
-                }
-                else -> false
-            }
-        }
+        layout.setOnTouchListener { view, event -> handleTouch(view, event, phoneNumber) }
 
-        // Set up window params
         val params = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.WRAP_CONTENT,
@@ -115,13 +134,12 @@ class OverlayManager(private val context: Context) {
         )
         
         params.gravity = Gravity.TOP
-        params.y = (context.resources.displayMetrics.heightPixels * 0.20).toInt() // 20% from top
+        params.y = (context.resources.displayMetrics.heightPixels * 0.20).toInt()
 
         overlayView = layout
         windowManager?.addView(overlayView, params)
 
-        // Auto dismiss after delay
-        val dismissDelay = if (callerInfo != null) 30000L else 3000L // 30 seconds for known contacts, 3 for unknown
+        val dismissDelay = if (callerInfo != null) 30000L else 3000L
         Handler(Looper.getMainLooper()).postDelayed({
             dismissOverlay()
         }, dismissDelay)

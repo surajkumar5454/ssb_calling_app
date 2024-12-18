@@ -6,6 +6,7 @@ import '../helpers/database_helper.dart';
 import '../helpers/image_database_helper.dart';
 import 'package:flutter/services.dart';
 import 'package:caller_app/screens/contact_details_screen.dart';
+import 'dart:convert';
 
 class CallDetectorService {
   final DatabaseHelper _databaseHelper = DatabaseHelper();
@@ -13,6 +14,7 @@ class CallDetectorService {
   bool _isInitialized = false;
   static OverlayEntry? _overlayEntry;
   static BuildContext? _context;
+  static final navigatorKey = GlobalKey<NavigatorState>();
   
   static const platform = MethodChannel('com.example.caller_app/phone_state');
   static final CallDetectorService _instance = CallDetectorService._internal();
@@ -21,10 +23,6 @@ class CallDetectorService {
 
   CallDetectorService._internal() {
     _setupMethodChannel();
-  }
-
-  void _setupMethodChannel() {
-    platform.setMethodCallHandler(_handleMethodCall);
   }
 
   void setContext(BuildContext context) {
@@ -91,6 +89,20 @@ class CallDetectorService {
             };
           }
           return null;
+        case 'navigateToContact':
+          final phoneNumber = call.arguments as String;
+          final contact = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
+          if (contact != null) {
+            // Add call log entry
+            await _databaseHelper.logCall(phoneNumber);
+            
+            if (!navigatorKey.currentState!.mounted) return;
+            await navigatorKey.currentState!.pushNamed(
+              '/contact_details',
+              arguments: contact,
+            );
+          }
+          return null;
         default:
           throw PlatformException(
             code: 'NotImplemented',
@@ -103,11 +115,12 @@ class CallDetectorService {
     }
   }
 
+  void _setupMethodChannel() {
+    platform.setMethodCallHandler(_handleMethodCall);
+  }
+
   Future<void> onIncomingCall(String phoneNumber) async {
     try {
-      // Log the call
-      await _databaseHelper.logCall(phoneNumber);
-
       // Check if overlay permission is granted
       if (!await Permission.systemAlertWindow.isGranted) {
         print('Overlay permission not granted');
@@ -120,6 +133,9 @@ class CallDetectorService {
 
       final callerInfo = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
       
+      // Log the call after we've checked the caller info
+      await _databaseHelper.logCall(phoneNumber);
+      
       if (callerInfo != null) {
         print('Found caller info: $callerInfo');
         
@@ -129,19 +145,67 @@ class CallDetectorService {
           imageBytes = await _imageDatabaseHelper.getImageByUidno(int.parse(callerInfo['uidno'].toString()));
         }
 
+        // Show overlay
         _showOverlay(
           callerInfo: callerInfo,
           phoneNumber: phoneNumber,
           imageBytes: imageBytes,
         );
+
+        // Show high-priority notification that appears on lock screen
+        await _showLockScreenNotification(
+          title: 'Incoming Call',
+          body: '${callerInfo['name']} (${callerInfo['rank']})\n${callerInfo['unit']}',
+          phoneNumber: phoneNumber,
+          callerInfo: callerInfo,
+          imageBytes: imageBytes,
+        );
+
       } else {
         print('No caller info found for number: $phoneNumber');
         _showOverlay(
           phoneNumber: phoneNumber,
         );
+        
+        // Show notification for unknown caller
+        await _showLockScreenNotification(
+          title: 'Incoming Call',
+          body: 'Unknown caller: $phoneNumber',
+          phoneNumber: phoneNumber,
+        );
       }
     } catch (e) {
       print('Error handling incoming call: $e');
+    }
+  }
+
+  Future<void> _showLockScreenNotification({
+    required String title,
+    required String body,
+    required String phoneNumber,
+    Map<String, dynamic>? callerInfo,
+    Uint8List? imageBytes,
+  }) async {
+    try {
+      final Map<String, dynamic> args = {
+        'title': title,
+        'body': body,
+        'id': phoneNumber.hashCode,
+        'payload': callerInfo != null ? Uri.encodeFull(callerInfo.toString()) : phoneNumber,
+      };
+
+      if (imageBytes != null) {
+        args['image'] = base64Encode(imageBytes);
+      }
+
+      await platform.invokeMethod('showNotification', args);
+
+      // Auto cancel notification after 30 seconds
+      Future.delayed(const Duration(seconds: 30), () {
+        platform.invokeMethod('cancelNotification', {'id': phoneNumber.hashCode});
+      });
+    } catch (e) {
+      print('Error showing notification: $e');
     }
   }
 

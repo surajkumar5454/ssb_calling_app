@@ -105,7 +105,7 @@ class DatabaseHelper {
         version: 1,
         onCreate: (Database db, int version) async {
           print('Creating call logs table...');
-          await db.execute('''
+          await db.execute(''' 
             CREATE TABLE call_logs (
               id INTEGER PRIMARY KEY AUTOINCREMENT,
               phone_number TEXT NOT NULL,
@@ -142,7 +142,7 @@ class DatabaseHelper {
   Future<Map<String, dynamic>?> getContactByPhoneNumber(String phoneNumber) async {
     try {
       final db = await database;
-      
+
       // Process the phone number
       phoneNumber = phoneNumber.replaceAll(RegExp(r'\s+'), ''); // Remove whitespace
       if (phoneNumber.startsWith('+91')) {
@@ -150,14 +150,14 @@ class DatabaseHelper {
       }
       // Get last 10 digits
       phoneNumber = phoneNumber.substring(max(0, phoneNumber.length - 10));
-      
+
       print('Searching for processed number: $phoneNumber');
 
       // First get the uidno from parmanentinfo table checking both mobno and homephone
-      final List<Map<String, dynamic>> uidResults = await db.rawQuery('''
+      final List<Map<String, dynamic>> uidResults = await db.rawQuery(''' 
         SELECT uidno 
         FROM parmanentinfo 
-        WHERE trim(mobno) = ? OR trim(homephone) = ?
+        WHERE trim(mobno) = ? OR trim(homephone) = ? 
         LIMIT 1
       ''', [phoneNumber, phoneNumber]);
 
@@ -170,7 +170,7 @@ class DatabaseHelper {
       print('Found uidno: $uidno');
 
       // Get detailed info using the join query
-      final List<Map<String, dynamic>> results = await db.rawQuery('''
+      final List<Map<String, dynamic>> results = await db.rawQuery(''' 
         SELECT 
           p.uidno,
           p.name,
@@ -246,14 +246,22 @@ class DatabaseHelper {
   Future<void> logCall(String phoneNumber) async {
     try {
       final db = await logsDatabase;
-      
+
+      // Process the phone number
+      phoneNumber = phoneNumber.replaceAll(RegExp(r'\s+'), ''); // Remove whitespace
+      if (phoneNumber.startsWith('+91')) {
+        phoneNumber = phoneNumber.substring(3); // Remove +91 prefix
+      }
+      // Get last 10 digits
+      phoneNumber = phoneNumber.substring(max(0, phoneNumber.length - 10));
+
       await db.insert('call_logs', {
         'phone_number': phoneNumber,
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
+      print('Call logged successfully for number: $phoneNumber');
     } catch (e) {
       print('Error logging call: $e');
-      print('Stack trace: ${StackTrace.current}');
     }
   }
 
@@ -261,7 +269,7 @@ class DatabaseHelper {
     try {
       final logsDb = await logsDatabase;
       final contactsDb = await database;
-      
+
       // Get call logs
       final List<Map<String, dynamic>> logs = await logsDb.query(
         'call_logs',
@@ -290,6 +298,55 @@ class DatabaseHelper {
     } catch (e) {
       print('Error getting call logs: $e');
       print('Stack trace: ${StackTrace.current}');
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getAllContactsWithImages() async {
+    try {
+      final db = await database;
+      final List<Map<String, dynamic>> results = await db.rawQuery('''
+        SELECT 
+          p.uidno,
+          p.name,
+          p.mobno,
+          p.homephone,
+          p.image_path,
+          j.rank as rank_cd,
+          j.branch as branch_cd,
+          j.unit as unit_cd,
+          u.unit_nm,
+          r.rnk_nm,
+          r.brn_nm
+        FROM 
+          parmanentinfo p
+        JOIN 
+          joininfo j ON p.uidno = j.uidno
+        JOIN 
+          unitdep u ON j.unit = u.unit_cd
+        JOIN 
+          rnk_brn_mas r ON j.rank = r.rnk_cd AND j.branch = r.brn_cd
+        WHERE 
+          p.image_path IS NOT NULL
+        ORDER BY 
+          j.dateofjoin DESC
+      ''');
+
+      return results.map((row) => {
+        'uidno': row['uidno']?.toString().trim(),
+        'name': row['name']?.toString().trim(),
+        'unit': row['unit_nm']?.toString().trim(),
+        'rank': row['rnk_nm']?.toString().trim(),
+        'branch': row['brn_nm']?.toString().trim(),
+        'mobno': row['mobno']?.toString().trim(),
+        'homephone': row['homephone']?.toString().trim(),
+        'rank_cd': row['rank_cd']?.toString().trim(),
+        'branch_cd': row['branch_cd']?.toString().trim(),
+        'unit_cd': row['unit_cd']?.toString().trim(),
+        'image_path': row['image_path']?.toString().trim(),
+      }).toList();
+    } catch (e) {
+      print('Error getting contacts with images: $e');
       return [];
     }
   }
