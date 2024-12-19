@@ -9,6 +9,7 @@ class ImageDatabaseHelper {
   static final ImageDatabaseHelper _instance = ImageDatabaseHelper._internal();
   static Database? _database;
   static const String dbName = 'images_resize.db';
+  static const String assetPath = 'assets/databases/images_resize.db';
 
   factory ImageDatabaseHelper() => _instance;
 
@@ -20,22 +21,53 @@ class ImageDatabaseHelper {
     return _database!;
   }
 
-  Future<Database> _initDatabase() async {
-    final databasesPath = await getDatabasesPath();
-    final path = join(databasesPath, dbName);
-    print('Image database path: $path');
+  Future<void> copyDatabaseFromAssets() async {
+    try {
+      final databasesPath = await getDatabasesPath();
+      final path = join(databasesPath, dbName);
 
-    // Check if database exists in local storage
-    if (await File(path).exists()) {
-      print('Image database found in local storage');
+      // Make sure the directory exists
+      try {
+        await Directory(dirname(path)).create(recursive: true);
+      } catch (_) {}
+
+      // Check if database already exists
+      final exists = await databaseExists(path);
+      if (!exists) {
+        print('Copying database from assets to: $path');
+        
+        // Copy from asset
+        ByteData data = await rootBundle.load(assetPath);
+        List<int> bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+        
+        // Write and flush the bytes to the database file
+        await File(path).writeAsBytes(bytes, flush: true);
+        print('Database copied successfully');
+      }
+    } catch (e) {
+      print('Error copying database from assets: $e');
+      rethrow;
+    }
+  }
+
+  Future<Database> _initDatabase() async {
+    try {
+      final databasesPath = await getDatabasesPath();
+      final path = join(databasesPath, dbName);
+      print('Image database path: $path');
+
+      // Try to copy database from assets if it doesn't exist
+      await copyDatabaseFromAssets();
+
+      // Open the database
       return await openDatabase(
         path,
         readOnly: true,
         singleInstance: false,
       );
-    } else {
-      print('Image database not found. Please copy images_resize.db to: $path');
-      throw Exception('Image database not found. Please copy images_resize.db to: $path');
+    } catch (e) {
+      print('Error initializing image database: $e');
+      rethrow;
     }
   }
 
@@ -50,20 +82,17 @@ class ImageDatabaseHelper {
         columns: ['image'],
         where: 'uidno = ?',
         whereArgs: [uidno],
-        limit: 1,
       );
 
-      print('ImageDatabaseHelper: Query results: ${results.length} rows found');
-      
       if (results.isNotEmpty && results.first['image'] != null) {
-        final imageData = results.first['image'] as Uint8List;
-        print('ImageDatabaseHelper: Image found, size: ${imageData.length} bytes');
-        return imageData;
+        print('ImageDatabaseHelper: Image found for UID: $uidno');
+        return results.first['image'] as Uint8List;
+      } else {
+        print('ImageDatabaseHelper: No image found for UID: $uidno');
+        return null;
       }
-      print('ImageDatabaseHelper: No image found for UID: $uidno');
-      return null;
     } catch (e) {
-      print('ImageDatabaseHelper: Error getting image from database: $e');
+      print('ImageDatabaseHelper: Error getting image: $e');
       return null;
     }
   }

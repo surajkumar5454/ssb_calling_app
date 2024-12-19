@@ -16,29 +16,108 @@ class CallHistoryScreen extends StatefulWidget {
 class _CallHistoryScreenState extends State<CallHistoryScreen> {
   final DatabaseHelper _databaseHelper = DatabaseHelper();
   final CallSimulatorService _callSimulator = CallSimulatorService();
+  final ScrollController _scrollController = ScrollController();
+  
+  List<Map<String, dynamic>> _callLogs = [];
+  bool _isLoading = false;
+  bool _hasError = false;
+  String _errorMessage = '';
+  static const int _pageSize = 20;
+  int _currentPage = 0;
+  bool _hasMoreData = true;
 
-  Future<void> _simulateIncomingCall() async {
+  @override
+  void initState() {
+    super.initState();
+    _loadMoreLogs();
+    _scrollController.addListener(_onScroll);
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMoreLogs() async {
+    if (_isLoading || !_hasMoreData) return;
+
+    setState(() {
+      _isLoading = true;
+      _hasError = false;
+      _errorMessage = '';
+    });
+
     try {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Simulating incoming call...'),
-          duration: Duration(seconds: 2),
-        ),
+      final newLogs = await _databaseHelper.getCallLogs(
+        offset: _currentPage * _pageSize,
+        limit: _pageSize,
       );
-      
-      await _callSimulator.simulateIncomingCall('+1234567890');
+
+      setState(() {
+        if (newLogs.isEmpty) {
+          _hasMoreData = false;
+        } else {
+          _callLogs.addAll(newLogs);
+          _currentPage++;
+        }
+        _isLoading = false;
+      });
     } catch (e) {
-      print('Error details: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
-      }
+      print('Error loading logs: $e');
+      setState(() {
+        _isLoading = false;
+        _hasError = true;
+        _errorMessage = 'Failed to load call logs. Please try again.';
+      });
     }
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 500) {
+      _loadMoreLogs();
+    }
+  }
+
+  Future<void> _refreshLogs() async {
+    setState(() {
+      _callLogs.clear();
+      _currentPage = 0;
+      _hasMoreData = true;
+      _hasError = false;
+      _errorMessage = '';
+    });
+    await _loadMoreLogs();
+  }
+
+  Widget _buildErrorWidget() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(
+              Icons.error_outline,
+              color: Colors.red,
+              size: 48,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              _errorMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red),
+            ),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _refreshLogs,
+              child: const Text('Try Again'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -48,49 +127,43 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
         title: const Text('Call History'),
         actions: [
           IconButton(
-            icon: const Icon(Icons.phone),
-            onPressed: _simulateIncomingCall,
-            tooltip: 'Simulate incoming call',
-          ),
-          IconButton(
-            icon: const Icon(Icons.search),
-            onPressed: () {
-              // TODO: Implement search functionality
-            },
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshLogs,
+            tooltip: 'Refresh',
           ),
         ],
       ),
-      body: FutureBuilder<List<Map<String, dynamic>>>(
-        future: _databaseHelper.getCallLogs(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
-          }
+      body: RefreshIndicator(
+        onRefresh: _refreshLogs,
+        child: _hasError
+            ? _buildErrorWidget()
+            : _callLogs.isEmpty && !_isLoading
+                ? const Center(child: Text('No call history'))
+                : ListView.builder(
+                    controller: _scrollController,
+                    itemCount: _callLogs.length + (_isLoading ? 1 : 0),
+                    itemBuilder: (context, index) {
+                      if (index == _callLogs.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(8.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
 
-          if (snapshot.hasError) {
-            return Center(child: Text('Error: ${snapshot.error}'));
-          }
-
-          final callLogs = snapshot.data ?? [];
-          if (callLogs.isEmpty) {
-            return const Center(child: Text('No call history'));
-          }
-
-          return ListView.builder(
-            itemCount: callLogs.length,
-            itemBuilder: (context, index) {
-              final call = callLogs[index];
-              return CallLogTile(
-                name: call['name'] ?? call['phone_number'],
-                phoneNumber: call['phone_number'],
-                timestamp: DateTime.fromMillisecondsSinceEpoch(call['timestamp']),
-                rank: call['rank'],
-                unit: call['unit'],
-                branch: call['branch'],
-              );
-            },
-          );
-        },
+                      final call = _callLogs[index];
+                      return CallLogTile(
+                        name: call['name'] ?? 'Unknown',
+                        phoneNumber: call['phone_number'],
+                        timestamp: DateTime.fromMillisecondsSinceEpoch(
+                            call['timestamp']),
+                        rank: call['rank'],
+                        unit: call['unit'],
+                        branch: call['branch'],
+                      );
+                    },
+                  ),
       ),
     );
   }
@@ -120,57 +193,64 @@ class CallLogTile extends StatelessWidget {
     final databaseHelper = DatabaseHelper();
     final imageDatabaseHelper = ImageDatabaseHelper();
 
-    return ListTile(
-      leading: CircleAvatar(
-        backgroundImage: null,
-        child: Text(name[0].toUpperCase()),
-      ),
-      title: Text(
-        name,
-        style: const TextStyle(
-          fontWeight: FontWeight.bold,
-        ),
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('$rank - $branch'),
-          Text(unit),
-          Text(
-            formattedDate,
-            style: TextStyle(
-              color: Theme.of(context).textTheme.bodySmall?.color,
-              fontSize: 12,
-            ),
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: Theme.of(context).primaryColor,
+          child: Text(
+            name[0].toUpperCase(),
+            style: const TextStyle(color: Colors.white),
           ),
-        ],
-      ),
-      trailing: Text(phoneNumber),
-      isThreeLine: true,
-      onTap: () async {
-        final contactInfo = await databaseHelper.getContactByPhoneNumber(phoneNumber);
-        if (contactInfo != null && context.mounted) {
-          // Load image if uidno is available
-          Uint8List? imageBytes;
-          if (contactInfo['uidno'] != null) {
-            imageBytes = await imageDatabaseHelper.getImageByUidno(
-              int.parse(contactInfo['uidno'].toString())
-            );
-          }
-          
-          if (context.mounted) {
-            Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => ContactDetailsScreen(
-                  contactInfo: contactInfo,
-                  imageBytes: imageBytes,
-                ),
+        ),
+        title: Text(
+          name,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$rank - $branch'),
+            Text(unit),
+            Text(
+              formattedDate,
+              style: TextStyle(
+                color: Theme.of(context).textTheme.bodySmall?.color,
+                fontSize: 12,
               ),
-            );
+            ),
+          ],
+        ),
+        trailing: Text(phoneNumber),
+        isThreeLine: true,
+        onTap: () async {
+          final contactInfo =
+              await databaseHelper.getContactByPhoneNumber(phoneNumber);
+          if (contactInfo != null && context.mounted) {
+            Uint8List? imageBytes;
+            if (contactInfo['uidno'] != null) {
+              imageBytes = await imageDatabaseHelper.getImageByUidno(
+                int.parse(contactInfo['uidno'].toString()),
+              );
+            }
+
+            if (context.mounted) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ContactDetailsScreen(
+                    contactInfo: contactInfo,
+                    imageBytes: imageBytes,
+                    number: phoneNumber,
+                  ),
+                ),
+              );
+            }
           }
-        }
-      },
+        },
+      ),
     );
   }
 }

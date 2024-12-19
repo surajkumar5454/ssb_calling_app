@@ -80,13 +80,22 @@ class CallDetectorService {
         case 'getCallerInfo':
           final phoneNumber = call.arguments as String;
           final contact = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
+          print('CallDetectorService: Contact info: $contact'); // Debug log
+          
+          // Log the call
+          await _databaseHelper.logCall(phoneNumber);
+          print('CallDetectorService: Logged call for number: $phoneNumber'); // Debug log
+          
           if (contact != null) {
-            return {
+            final callerInfo = {
               'name': contact['name'],
               'rank': contact['rank'],
-              'branch': contact['branch'],
+              'branch': contact['brn_nm'] ?? contact['branch'],  // Try both fields
               'unit': contact['unit'],
+              'uidno': contact['uidno'],
             };
+            print('CallDetectorService: Sending caller info to native: $callerInfo'); // Debug log
+            return callerInfo;
           }
           return null;
         case 'navigateToContact':

@@ -121,6 +121,9 @@ class MainActivity : FlutterActivity() {
             val channel = NotificationChannel(NOTIFICATION_CHANNEL_ID, name, importance).apply {
                 description = descriptionText
                 setShowBadge(true)
+                setSound(null, null) // Don't play sound as it might interfere with call ringtone
+                enableLights(true)
+                enableVibration(true)
                 lockscreenVisibility = NotificationCompat.VISIBILITY_PUBLIC
             }
             
@@ -150,10 +153,11 @@ class MainActivity : FlutterActivity() {
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-            .setAutoCancel(false)
+            .setAutoCancel(true)
             .setOngoing(true)
             .setFullScreenIntent(pendingIntent, true)
             .setContentIntent(pendingIntent)
+            .setSound(null) // Don't play sound as it might interfere with call ringtone
 
         // Add image if provided
         imageBase64?.let {
