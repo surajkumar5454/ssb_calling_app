@@ -25,22 +25,36 @@ class MainActivity : FlutterActivity() {
         private const val OVERLAY_PERMISSION_REQ_CODE = 1234
     }
 
+    private var initialIntent: Map<String, Any?>? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         
+        Log.d("MainActivity", "Configuring FlutterEngine")
+        
+        // Store initial intent data if it exists
+        intent?.let { intent ->
+            val phoneNumber = intent.getStringExtra("phone_number")
+            val callerInfo = intent.getStringExtra("caller_info")
+            if (phoneNumber != null) {
+                initialIntent = mapOf(
+                    "phone_number" to phoneNumber,
+                    "caller_info" to callerInfo
+                )
+            }
+        }
+
         // Store FlutterEngine reference for the BroadcastReceiver
         CallReceiver.flutterEngine = flutterEngine
+        Log.d("MainActivity", "Stored FlutterEngine reference: ${CallReceiver.flutterEngine != null}")
 
         // Check for overlay permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-            val intent = Intent(
-                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                Uri.parse("package:${packageName}")
-            )
-            startActivityForResult(intent, OVERLAY_PERMISSION_REQ_CODE)
+            requestOverlayPermission()
         }
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
+            Log.d("MainActivity", "Received method call: ${call.method}")
             when (call.method) {
                 "initialize" -> {
                     // Request dialer role if needed
@@ -61,6 +75,22 @@ class MainActivity : FlutterActivity() {
                     }
                     result.success(true)
                 }
+                "getInitialIntent" -> {
+                    result.success(initialIntent)
+                    // Clear it after sending to prevent duplicate handling
+                    initialIntent = null
+                }
+                "getCallerInfo" -> {
+                    val number = call.arguments as? String
+                    Log.d("MainActivity", "getCallerInfo called for number: $number")
+                    // Handle getCallerInfo method
+                    result.success(null)  // Your implementation here
+                }
+                "requestOverlayPermission" -> {
+                    Log.d("MainActivity", "Requesting overlay permission")
+                    requestOverlayPermission()
+                    result.success(null)
+                }
                 "showNotification" -> {
                     val title = call.argument<String>("title") ?: ""
                     val body = call.argument<String>("body") ?: ""
@@ -76,7 +106,10 @@ class MainActivity : FlutterActivity() {
                     cancelNotification(id)
                     result.success(null)
                 }
-                else -> result.notImplemented()
+                else -> {
+                    Log.d("MainActivity", "Method not implemented: ${call.method}")
+                    result.notImplemented()
+                }
             }
         }
 
@@ -84,10 +117,19 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == OVERLAY_PERMISSION_REQ_CODE) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
-                // Permission denied
-                Log.e("MainActivity", "Overlay permission denied")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this)) {
+                Log.d("MainActivity", "Overlay permission granted")
+                // Start the service now that we have permission
+                val serviceIntent = Intent(this, CallDetectorService::class.java)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    startForegroundService(serviceIntent)
+                } else {
+                    startService(serviceIntent)
+                }
+            } else {
+                Log.e("MainActivity", "Overlay permission not granted")
             }
         }
         if (requestCode == REQUEST_CODE_SET_DEFAULT_DIALER) {
@@ -99,7 +141,6 @@ class MainActivity : FlutterActivity() {
                 startService(serviceIntent)
             }
         }
-        super.onActivityResult(requestCode, resultCode, data)
     }
 
     override fun onDestroy() {
@@ -177,5 +218,15 @@ class MainActivity : FlutterActivity() {
     private fun cancelNotification(id: Int) {
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(id)
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(this)) {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivityForResult(intent, OVERLAY_PERMISSION_REQ_CODE)
+        }
     }
 }

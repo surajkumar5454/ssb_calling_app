@@ -16,6 +16,7 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
     <uses-permission android:name="android.permission.DISABLE_KEYGUARD" />
+    <uses-permission android:name="android.permission.BROADCAST_CALL_LOG_INFO"/>
     
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
@@ -73,9 +74,12 @@
         <receiver
             android:name=".CallReceiver"
             android:enabled="true"
-            android:exported="true">
-            <intent-filter>
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_CALL_LOG_INFO">
+            <intent-filter android:priority="1000">
                 <action android:name="android.intent.action.PHONE_STATE" />
+                <action android:name="android.intent.action.NEW_OUTGOING_CALL" />
+                <action android:name="android.telephony.action.PHONE_STATE_CHANGED" />
             </intent-filter>
         </receiver>
         

@@ -39,11 +39,7 @@ class _SearchNumberScreenState extends State<SearchNumberScreen> {
           context,
           MaterialPageRoute(
             builder: (context) => ContactDetailsScreen(
-              contactInfo: {
-                ...contactInfo,
-                'phone': _phoneController.text,
-              },
-              imageBytes: imageBytes,
+              contact: contactInfo,
             ),
           ),
         );

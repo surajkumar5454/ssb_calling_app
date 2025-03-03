@@ -241,9 +241,7 @@ class CallLogTile extends StatelessWidget {
                 context,
                 MaterialPageRoute(
                   builder: (context) => ContactDetailsScreen(
-                    contactInfo: contactInfo,
-                    imageBytes: imageBytes,
-                    number: phoneNumber,
+                    contact: contactInfo,
                   ),
                 ),
               );

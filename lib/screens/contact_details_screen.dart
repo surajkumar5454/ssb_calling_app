@@ -1,18 +1,46 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:photo_view/photo_view.dart';
+import '../helpers/image_database_helper.dart'; // Import ImageDatabaseHelper
 
-class ContactDetailsScreen extends StatelessWidget {
-  final Map<String, dynamic> contactInfo;
-  final Uint8List? imageBytes;
-  final String? number;
+class ContactDetailsScreen extends StatefulWidget {
+  final Map<String, dynamic> contact;
 
   const ContactDetailsScreen({
     Key? key,
-    required this.contactInfo,
-    this.imageBytes,
-    this.number,
+    required this.contact,
   }) : super(key: key);
+
+  @override
+  State<ContactDetailsScreen> createState() => _ContactDetailsScreenState();
+}
+
+class _ContactDetailsScreenState extends State<ContactDetailsScreen> {
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadImage();
+  }
+
+  Future<void> _loadImage() async {
+    if (widget.contact['uidno'] != null) {
+      try {
+        final imageDatabaseHelper = ImageDatabaseHelper();
+        final imageBytes = await imageDatabaseHelper.getImageByUidno(
+          int.parse(widget.contact['uidno'].toString()),
+        );
+        if (mounted) {
+          setState(() {
+            _imageBytes = imageBytes;
+          });
+        }
+      } catch (e) {
+        print('Error loading image: $e');
+      }
+    }
+  }
 
   void _showFullScreenImage(BuildContext context) {
     Navigator.of(context).push(
@@ -23,7 +51,7 @@ class ContactDetailsScreen extends StatelessWidget {
             children: [
               Center(
                 child: PhotoView(
-                  imageProvider: MemoryImage(imageBytes!),
+                  imageProvider: MemoryImage(_imageBytes!),
                   minScale: PhotoViewComputedScale.contained,
                   maxScale: PhotoViewComputedScale.covered * 2,
                 ),
@@ -61,7 +89,7 @@ class ContactDetailsScreen extends StatelessWidget {
               child: Column(
                 children: [
                   GestureDetector(
-                    onTap: imageBytes != null
+                    onTap: _imageBytes != null
                         ? () => _showFullScreenImage(context)
                         : null,
                     child: Hero(
@@ -72,14 +100,14 @@ class ContactDetailsScreen extends StatelessWidget {
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
                           color: Colors.grey[300],
-                          image: imageBytes != null
+                          image: _imageBytes != null
                               ? DecorationImage(
-                                  image: MemoryImage(imageBytes!),
+                                  image: MemoryImage(_imageBytes!),
                                   fit: BoxFit.cover,
                                 )
                               : null,
                         ),
-                        child: imageBytes == null
+                        child: _imageBytes == null
                             ? const Icon(
                                 Icons.person,
                                 size: 80,
@@ -91,7 +119,7 @@ class ContactDetailsScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 20),
                   Text(
-                    contactInfo['name']?.toString() ?? 'Unknown',
+                    widget.contact['name']?.toString() ?? 'Unknown',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 24,
@@ -108,29 +136,36 @@ class ContactDetailsScreen extends StatelessWidget {
                 children: [
                   _buildInfoTile(
                     'Rank',
-                    contactInfo['rank']?.toString() ?? 'Not Available',
+                    widget.contact['rank']?.toString() ?? 'Not Available',
                     Icons.military_tech,
                   ),
                   _buildInfoTile(
                     'Branch',
-                    contactInfo['branch']?.toString() ?? 'Not Available',
+                    widget.contact['branch']?.toString() ?? 'Not Available',
                     Icons.account_tree,
                   ),
                   _buildInfoTile(
                     'Unit',
-                    contactInfo['unit']?.toString() ?? 'Not Available',
+                    widget.contact['unit']?.toString() ?? 'Not Available',
                     Icons.business,
                   ),
                   _buildInfoTile(
                     'UID',
-                    contactInfo['uidno']?.toString() ?? 'Not Available',
+                    widget.contact['uidno']?.toString() ?? 'Not Available',
                     Icons.badge,
                   ),
-                  _buildInfoTile(
-                    'Phone',
-                    contactInfo['phone']?.toString() ?? 'Not Available',
-                    Icons.phone,
-                  ),
+                  if (widget.contact['mobno'] != null)
+                    _buildInfoTile(
+                      'Mobile',
+                      widget.contact['mobno'].toString(),
+                      Icons.phone_android,
+                    ),
+                  if (widget.contact['homephone'] != null)
+                    _buildInfoTile(
+                      'Home Phone',
+                      widget.contact['homephone'].toString(),
+                      Icons.phone,
+                    ),
                 ],
               ),
             ),
@@ -147,24 +182,26 @@ class ContactDetailsScreen extends StatelessWidget {
         children: [
           Icon(icon, size: 24, color: const Color(0xFF2C3E50)),
           const SizedBox(width: 15),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: Colors.grey,
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: Colors.grey,
+                  ),
                 ),
-              ),
-              Text(
-                value,
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w500,
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),

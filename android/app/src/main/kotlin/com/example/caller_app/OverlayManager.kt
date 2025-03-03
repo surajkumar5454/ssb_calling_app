@@ -2,172 +2,215 @@ package com.example.caller_app
 
 import android.content.Context
 import android.graphics.PixelFormat
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
 import android.view.WindowManager
-import android.widget.TextView
 import android.widget.ImageView
-import android.view.ViewGroup
-import android.graphics.Color
 import android.widget.LinearLayout
+import android.widget.TextView
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.widget.FrameLayout
-import android.graphics.drawable.GradientDrawable
 import android.view.MotionEvent
-import kotlin.math.abs
-import io.flutter.plugin.common.MethodChannel
+import android.widget.Button
+import android.content.Intent
+import android.view.animation.AnimationUtils
 
 class OverlayManager(private val context: Context) {
-    companion object {
-        private const val CHANNEL = "com.example.caller_app/phone_state"
-        var flutterEngine = CallReceiver.flutterEngine
-    }
-
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
-    private var initialX: Float = 0f
+    private val handler = Handler(Looper.getMainLooper())
+    private var initialX: Int = 0
+    private var initialY: Int = 0
     private var initialTouchX: Float = 0f
-    private var isDismissing = false
-    private var isTap = false
-    private var startClickTime: Long = 0
+    private var initialTouchY: Float = 0f
+    
+    companion object {
+        private const val TAG = "OverlayManager"
+    }
 
-    private fun handleTouch(view: View, event: MotionEvent, phoneNumber: String): Boolean {
-        when (event.action) {
-            MotionEvent.ACTION_DOWN -> {
-                isTap = true
-                startClickTime = System.currentTimeMillis()
-                initialX = view.x
-                initialTouchX = event.rawX
-                return true
-            }
-            MotionEvent.ACTION_MOVE -> {
-                val moved = abs(event.rawX - initialTouchX)
-                if (moved > 10) { // Small threshold to differentiate between tap and swipe
-                    isTap = false
-                }
-                view.x = initialX + event.rawX - initialTouchX
-                return true
-            }
-            MotionEvent.ACTION_UP -> {
-                val clickDuration = System.currentTimeMillis() - startClickTime
-                val moved = abs(event.rawX - initialTouchX)
-                
-                when {
-                    moved > 100 -> { // Swipe threshold
-                        dismissOverlay()
-                    }
-                    isTap && clickDuration < 200 -> { // Tap threshold
-                        // Navigate to contact details
-                        flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
-                            MethodChannel(messenger, CHANNEL).invokeMethod("navigateToContact", phoneNumber)
-                        }
-                        dismissOverlay()
-                    }
-                    else -> {
-                        view.x = initialX // Reset position
-                    }
-                }
-                return true
-            }
-            else -> return false
+    init {
+        try {
+            windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            Log.d(TAG, "OverlayManager initialized with context: ${context.javaClass.simpleName}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error initializing OverlayManager: ${e.message}")
+            e.printStackTrace()
         }
     }
 
     fun showOverlay(callerInfo: Map<String, Any>?, phoneNumber: String) {
-        if (overlayView != null) return
+        try {
+            Log.d(TAG, "Showing overlay for number: $phoneNumber")
+            dismissOverlay() // Remove any existing overlay first
+            
+            val inflater = LayoutInflater.from(context)
+            val view = LinearLayout(context).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER
+                setPadding(32, 32, 32, 32)
+                setBackgroundResource(android.R.drawable.dialog_holo_light_frame)
+            }
 
-        windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+            // Profile image
+            val profileIcon = ImageView(context).apply {
+                setImageResource(android.R.drawable.ic_dialog_info)
+                val size = (64 * context.resources.displayMetrics.density).toInt()
+                layoutParams = LinearLayout.LayoutParams(size, size)
+            }
+            view.addView(profileIcon)
 
-        val layout = FrameLayout(context)
-        layout.layoutParams = ViewGroup.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
-        
-        val cardBackground = GradientDrawable()
-        cardBackground.setColor(Color.parseColor("#BF2C3E50"))
-        cardBackground.cornerRadius = 16f * context.resources.displayMetrics.density
-        
-        val contentLayout = LinearLayout(context)
-        contentLayout.orientation = LinearLayout.HORIZONTAL
-        contentLayout.setPadding(32, 24, 32, 24)
-        
-        val profileIcon = ImageView(context)
-        profileIcon.setImageResource(android.R.drawable.ic_dialog_info)
-        val iconSize = (48 * context.resources.displayMetrics.density).toInt()
-        profileIcon.layoutParams = LinearLayout.LayoutParams(iconSize, iconSize)
+            // Name and details
+            val detailsText = TextView(context).apply {
+                if (callerInfo != null) {
+                    text = buildString {
+                        append(callerInfo["name"]?.toString() ?: "Unknown")
+                        append("\n")
+                        append(callerInfo["rank"]?.toString() ?: "")
+                        append("\n")
+                        append(callerInfo["unit"]?.toString() ?: "")
+                        if (!callerInfo["branch"]?.toString().isNullOrEmpty()) {
+                            append("\n")
+                            append(callerInfo["branch"])
+                        }
+                    }
+                } else {
+                    text = "Unknown Caller\n$phoneNumber"
+                }
+                textSize = 18f
+                gravity = Gravity.CENTER
+                setPadding(16, 16, 16, 16)
+            }
+            view.addView(detailsText)
 
-        val textContent = LinearLayout(context)
-        textContent.orientation = LinearLayout.VERTICAL
-        textContent.setPadding((16 * context.resources.displayMetrics.density).toInt(), 0, 0, 0)
-        
-        if (callerInfo != null) {
-            addTextView(textContent, callerInfo["name"]?.toString() ?: "Unknown", 18f, true)
-            addTextView(textContent, "${callerInfo["rank"]} - ${callerInfo["branch"]}", 14f)
-            addTextView(textContent, "Unit: ${callerInfo["unit"]}", 14f)
-            addTextView(textContent, formatPhoneNumber(phoneNumber), 12f)
-        } else {
-            addTextView(textContent, "Incoming Call", 18f, true)
-            addTextView(textContent, formatPhoneNumber(phoneNumber), 16f)
+            // Buttons container
+            val buttonsLayout = LinearLayout(context).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER
+                layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT).apply {
+                    topMargin = (16 * context.resources.displayMetrics.density).toInt()
+                }
+            }
+
+            // View Details button
+            val viewDetailsButton = Button(context).apply {
+                text = "View Details"
+                setOnClickListener {
+                    val intent = Intent(context, MainActivity::class.java).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                        putExtra("phone_number", phoneNumber)
+                    }
+                    context.startActivity(intent)
+                    dismissOverlay()
+                }
+            }
+            buttonsLayout.addView(viewDetailsButton)
+
+            // Dismiss button
+            val dismissButton = Button(context).apply {
+                text = "Dismiss"
+                setOnClickListener {
+                    dismissOverlay()
+                }
+            }
+            buttonsLayout.addView(dismissButton)
+
+            view.addView(buttonsLayout)
+
+            // Add touch listener for dragging
+            view.setOnTouchListener(object : View.OnTouchListener {
+                private var initialX: Int = 0
+                private var initialY: Int = 0
+                private var initialTouchX: Float = 0f
+                private var initialTouchY: Float = 0f
+
+                override fun onTouch(v: View?, event: MotionEvent?): Boolean {
+                    when (event?.action) {
+                        MotionEvent.ACTION_DOWN -> {
+                            initialX = params.x
+                            initialY = params.y
+                            initialTouchX = event.rawX
+                            initialTouchY = event.rawY
+                            return true
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            params.x = initialX + (event.rawX - initialTouchX).toInt()
+                            params.y = initialY + (event.rawY - initialTouchY).toInt()
+                            windowManager?.updateViewLayout(view, params)
+                            return true
+                        }
+                    }
+                    return false
+                }
+            })
+
+            val params = WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
+                        WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON or
+                        WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
+                PixelFormat.TRANSLUCENT
+            ).apply {
+                gravity = Gravity.TOP or Gravity.START
+                x = 0
+                y = 100
+            }
+
+            try {
+                windowManager?.addView(view, params)
+                overlayView = view
+                
+                // Add entrance animation
+                view.startAnimation(AnimationUtils.loadAnimation(context, android.R.anim.fade_in))
+                
+                Log.d(TAG, "Overlay shown successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error showing overlay: ${e.message}")
+                e.printStackTrace()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in showOverlay: ${e.message}")
+            e.printStackTrace()
         }
-
-        contentLayout.addView(profileIcon)
-        contentLayout.addView(textContent)
-        layout.addView(contentLayout)
-        layout.background = cardBackground
-
-        layout.setOnTouchListener { view, event -> handleTouch(view, event, phoneNumber) }
-
-        val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) 
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            else 
-                WindowManager.LayoutParams.TYPE_PHONE,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-                    WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH,
-            PixelFormat.TRANSLUCENT
-        )
-        
-        params.gravity = Gravity.TOP
-        params.y = (context.resources.displayMetrics.heightPixels * 0.20).toInt()
-
-        overlayView = layout
-        windowManager?.addView(overlayView, params)
-
-        val dismissDelay = if (callerInfo != null) 30000L else 3000L
-        Handler(Looper.getMainLooper()).postDelayed({
-            dismissOverlay()
-        }, dismissDelay)
-    }
-
-    private fun addTextView(parent: LinearLayout, text: String, textSize: Float, isBold: Boolean = false) {
-        val textView = TextView(context)
-        textView.text = text
-        textView.setTextColor(Color.WHITE)
-        textView.textSize = textSize
-        if (isBold) textView.setTypeface(null, android.graphics.Typeface.BOLD)
-        parent.addView(textView)
-    }
-
-    private fun formatPhoneNumber(number: String): String {
-        return if (number.length > 10) number.substring(number.length - 10) else number
     }
 
     fun dismissOverlay() {
-        if (!isDismissing && overlayView != null) {
-            isDismissing = true
-            try {
-                windowManager?.removeView(overlayView)
-            } catch (e: Exception) {
-                e.printStackTrace()
+        try {
+            overlayView?.let { view ->
+                try {
+                    // Add exit animation
+                    val anim = AnimationUtils.loadAnimation(context, android.R.anim.fade_out)
+                    anim.duration = 200
+                    view.startAnimation(anim)
+                    
+                    handler.postDelayed({
+                        try {
+                            windowManager?.removeView(view)
+                            overlayView = null
+                            Log.d(TAG, "Overlay dismissed successfully")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Error removing overlay view: ${e.message}")
+                        }
+                    }, 200)
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error animating overlay dismissal: ${e.message}")
+                    // Fallback to immediate removal
+                    try {
+                        windowManager?.removeView(view)
+                        overlayView = null
+                    } catch (e2: Exception) {
+                        Log.e(TAG, "Error in fallback overlay removal: ${e2.message}")
+                    }
+                }
             }
-            overlayView = null
-            isDismissing = false
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in dismissOverlay: ${e.message}")
+            e.printStackTrace()
         }
     }
 }

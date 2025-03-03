@@ -5,6 +5,7 @@ import 'services/call_detector_service.dart';
 import 'helpers/database_helper.dart';
 import 'screens/call_history_screen.dart';
 import 'screens/search_number_screen.dart';
+import 'screens/contact_details_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,6 +47,21 @@ class MyApp extends StatelessWidget {
           colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2C3E50)),
           useMaterial3: true,
         ),
+        initialRoute: '/',
+        onGenerateRoute: (settings) {
+          if (settings.name == '/') {
+            return MaterialPageRoute(
+              builder: (context) => const MyHomePage(title: 'Caller App'),
+            );
+          } else if (settings.name == '/contact_details') {
+            return MaterialPageRoute(
+              builder: (context) => ContactDetailsScreen(
+                contact: settings.arguments as Map<String, dynamic>,
+              ),
+            );
+          }
+          return null;
+        },
         home: const MyHomePage(title: 'Caller App'),
       ),
     );
@@ -71,6 +87,32 @@ class _MyHomePageState extends State<MyHomePage> {
   void initState() {
     super.initState();
     _initializeApp();
+    _handleInitialIntent();
+  }
+
+  Future<void> _handleInitialIntent() async {
+    try {
+      final intent = await CallDetectorService.platform.invokeMethod<Map<dynamic, dynamic>>('getInitialIntent');
+      if (intent != null) {
+        final phoneNumber = intent['phone_number'] as String?;
+        final callerInfoStr = intent['caller_info'] as String?;
+        
+        if (phoneNumber != null) {
+          print('Received intent with phone number: $phoneNumber');
+          final contact = await DatabaseHelper().getContactByPhoneNumber(phoneNumber);
+          if (contact != null) {
+            if (!mounted) return;
+            Navigator.pushNamed(
+              context,
+              '/contact_details',
+              arguments: contact,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      print('Error handling initial intent: $e');
+    }
   }
 
   Future<void> _initializeApp() async {

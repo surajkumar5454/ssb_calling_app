@@ -82,10 +82,6 @@ class CallDetectorService {
           final contact = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
           print('CallDetectorService: Contact info: $contact'); // Debug log
           
-          // Log the call
-          await _databaseHelper.logCall(phoneNumber);
-          print('CallDetectorService: Logged call for number: $phoneNumber'); // Debug log
-          
           if (contact != null) {
             final callerInfo = {
               'name': contact['name'],
@@ -102,9 +98,6 @@ class CallDetectorService {
           final phoneNumber = call.arguments as String;
           final contact = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
           if (contact != null) {
-            // Add call log entry
-            await _databaseHelper.logCall(phoneNumber);
-            
             if (!navigatorKey.currentState!.mounted) return;
             await navigatorKey.currentState!.pushNamed(
               '/contact_details',
@@ -142,8 +135,9 @@ class CallDetectorService {
 
       final callerInfo = await _databaseHelper.getContactByPhoneNumber(phoneNumber);
       
-      // Log the call after we've checked the caller info
+      // Log the call when we first detect it
       await _databaseHelper.logCall(phoneNumber);
+      print('CallDetectorService: Logged incoming call for number: $phoneNumber');
       
       if (callerInfo != null) {
         print('Found caller info: $callerInfo');
@@ -265,9 +259,7 @@ class CallDetectorService {
                     _context!,
                     MaterialPageRoute(
                       builder: (context) => ContactDetailsScreen(
-                        contactInfo: callerInfo,
-                        imageBytes: imageBytes,
-                        number: phoneNumber,
+                        contact: callerInfo,
                       ),
                     ),
                   );
